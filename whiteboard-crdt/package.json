@@ -1,0 +1,18 @@
+{
+  "name": "whiteboard-crdt",
+  "version": "2.0.0",
+  "description": "协作白板内核 v2：CRDT 最终一致 / 多工具对象化白板 / 选择性撤销 / 事务原子组 / 操作压缩 / 压感笔迹 / 分块橡皮擦",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "sync": "sh tools/sync-public.sh",
+    "test": "node tests/run-all.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

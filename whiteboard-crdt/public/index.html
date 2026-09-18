@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>协作白板 v2 · CRDT 内核</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 加入房间 -->
+  <div id="joinScreen" class="join-screen">
+    <form id="joinForm" class="join-card">
+      <h1>协作白板 <span class="ver">v2 · CRDT</span></h1>
+      <p class="sub">多用户并发 · 对象化白板 · 选择性撤销 · 事务原子组 · 压感笔迹 · 分块橡皮</p>
+      <input id="roomInput" type="text" placeholder="房间号，如 crdt-101" autocomplete="off" required />
+      <input id="nameInput" type="text" placeholder="你的昵称（可选）" autocomplete="off" maxlength="20" />
+      <button type="submit">加入房间</button>
+      <div class="features">
+        <b>内核特性：</b>
+        <span>Lamport 时钟 + 依赖向量因果序</span>
+        <span>LWW 字段级最终一致</span>
+        <span>只撤销自己 / 不破坏他人</span>
+        <span>多选移动原子组</span>
+        <span>连续操作压缩</span>
+        <span>RDP 简化 + Catmull-Rom</span>
+        <span>像素/对象/整笔橡皮擦</span>
+      </div>
+    </form>
+  </div>
+
+  <!-- 白板主界面 -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand">协作白板 <span class="ver">v2</span></div>
+      <div class="room-info">
+        <span>房间 <b id="roomLabel"></b></span>
+        <span class="dot">·</span>
+        <span id="userLabel"></span>
+        <span class="dot">·</span>
+        <span id="membersLabel">在线 1</span>
+      </div>
+      <div class="top-right">
+        <span id="statusDot" class="status-dot offline"></span>
+        <span id="statusText" class="status-text">离线</span>
+        <span class="dot">·</span>
+        <span class="clock-info">LC <b id="lamportText">0</b> · seq <b id="seqText">-</b> · 缓冲 <b id="bufferText">0</b></span>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <!-- 工具栏 -->
+      <aside class="toolbar" id="toolbar">
+        <div class="tool-group" data-group="笔刷">
+          <button data-tool="pen" class="tool active" title="压感笔">✏️</button>
+          <button data-tool="highlighter" class="tool" title="荧光笔">🖍️</button>
+          <button data-tool="dash" class="tool" title="虚线">╍</button>
+          <button data-tool="texture" class="tool" title="纹理笔">▩</button>
+          <button data-tool="arrow" class="tool" title="箭头">↗️</button>
+        </div>
+        <div class="tool-group">
+          <button data-tool="select" class="tool" title="选择 / 移动 / 缩放 / 旋转">➡️</button>
+          <button data-tool="eraser-pixel" class="tool" title="像素橡皮（分块同步）">🧽</button>
+          <button data-tool="eraser-object" class="tool" title="对象橡皮（整笔/整对象擦除）">🧹</button>
+        </div>
+        <div class="tool-group">
+          <button data-tool="shape-rect" class="tool" title="矩形">▭</button>
+          <button data-tool="shape-ellipse" class="tool" title="椭圆">⬭</button>
+          <button data-tool="shape-line" class="tool">／</button>
+          <button data-tool="shape-arrow" class="tool">➔</button>
+          <button data-tool="shape-triangle" class="tool">△</button>
+          <button data-tool="shape-diamond" class="tool">◇</button>
+          <button data-tool="shape-star" class="tool">☆</button>
+          <button data-tool="recognize" class="tool" title="画完自动识别为图形">✨</button>
+        </div>
+        <div class="tool-group">
+          <button data-tool="text" class="tool" title="文本">T</button>
+          <button data-tool="note" class="tool" title="便签">🗒️</button>
+          <button data-tool="image" class="tool" title="图片">🖼️</button>
+          <input type="file" id="imageFile" accept="image/*" hidden />
+        </div>
+        <div class="tool-group vertical">
+          <button id="undoBtn" class="tool" title="撤销我的上一步（Ctrl+Z）">↶</button>
+          <button id="redoBtn" class="tool" title="重做（Ctrl+Y）">↷</button>
+          <button id="historyBtn" class="tool" title="选择性撤销我的历史操作">🗂</button>
+          <button id="deleteBtn" class="tool" title="删除选中">🗑</button>
+        </div>
+        <div class="tool-group vertical">
+          <button id="frontBtn" class="tool" title="置顶">⤒</button>
+          <button id="backBtn" class="tool" title="置底">⤓</button>
+          <button id="groupBtn" class="tool" title="组合">⧉</button>
+          <button id="ungroupBtn" class="tool" title="解组">⧈</button>
+        </div>
+      </aside>
+
+      <!-- 画布区 -->
+      <main class="board-wrap" id="boardWrap">
+        <canvas id="mainCanvas"></canvas>
+        <input id="floatInput" class="float-input hidden" />
+        <div class="hud">
+          <div class="hud-row">
+            <input id="colorInput" type="color" value="#1f2937" title="颜色" />
+            <label>宽 <input id="widthInput" type="range" min="1" max="40" value="4" /></label>
+            <span id="widthValue" class="width-val">4</span>
+            <label class="chk"><input id="pressureChk" type="checkbox" checked />压感变宽</label>
+            <label class="chk"><input id="speedChk" type="checkbox" checked />速度变细</label>
+            <label class="chk"><input id="ink2textChk" type="checkbox" />手写转文字</label>
+          </div>
+        </div>
+      </main>
+
+      <!-- 选择性撤销面板 -->
+      <aside id="historyPanel" class="history-panel hidden">
+        <h3>我的操作历史（选择性撤销）</h3>
+        <p class="hint">撤销不会破坏其他成员在此之后的修改</p>
+        <div id="historyList"></div>
+      </aside>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
